@@ -1,11 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <semaphore.h>
 
 void variation1();
 
 void *calculateElement(void *args);
+
+void variation2();
+
+void *calculateRow(void *args);
 
 int **matrixA;
 int aRows, aColumns;
@@ -13,14 +16,13 @@ int aRows, aColumns;
 int **matrixB;
 int bRows, bColumns;
 
-sem_t mutex;
+int **matrixC;
+int cRows, cColumns;
 
 int main() {
 
-    //open input file in read mode
     FILE *pInputFile = fopen("input.txt", "r");
 
-    //check if it exists
     if (pInputFile == NULL) {
         puts("couldn't find input file");
         exit(0);
@@ -50,42 +52,62 @@ int main() {
             fscanf(pInputFile, "%d", &matrixB[i][j]);
     }
 
-    //close input file
     fclose(pInputFile);
 
 
-//    for (int i = 0; i < aRows; i++) {
-//        for (int j = 0; j < aColumns; j++) {
-//            printf("%d ", matrixA[i][j]);
-//        }
-//        puts("");
-//    }
-//
-//    for (int i = 0; i < bRows; i++) {
-//        for (int j = 0; j < bColumns; j++) {
-//            printf("%d ", matrixB[i][j]);
-//        }
-//        puts("");
-//    }
+    cRows = aRows;
+    cColumns = bColumns;
 
+    matrixC = (int **) malloc(cRows * sizeof(int *));
 
-    sem_init(&mutex, 0, 1);
+    for (int i = 0; i < aRows; i++) {
+        matrixC[i] = (int *) malloc(cColumns * sizeof(int));
+    }
 
+    FILE *pOut = fopen("output.txt", "w");
+    clock_t begin, end;
+
+    begin = clock();
     variation1();
+    end = clock();
 
-    sem_destroy(&mutex);
+    double variation1_time_spent = (double) (end - begin) / CLOCKS_PER_SEC;
+
+    for (int i = 0; i < cRows; i++) {
+        for (int j = 0; j < cColumns; j++) {
+            fprintf(pOut, "%d ", matrixC[i][j]);
+        }
+        fprintf(pOut, "\n");
+    }
+
+    fprintf(pOut, "END1 [%lf]\n", variation1_time_spent);
+
+    begin = clock();
+    variation2();
+    end = clock();
+
+    double variation2_time_spent = (double) (end - begin) / CLOCKS_PER_SEC;
+
+    for (int i = 0; i < cRows; i++) {
+        for (int j = 0; j < cColumns; j++) {
+            fprintf(pOut, "%d ", matrixC[i][j]);
+        }
+        fprintf(pOut, "\n");
+    }
+
+    fprintf(pOut, "END2 [%lf]", variation2_time_spent);
+
+
+    fclose(pOut);
 
     return 0;
 }
-
 
 struct ThreadData {
     int aRowIndex;
     int bColumnIndex;
 };
 
-//program 1 starts from here
-//matrixA , matrixB are shared memory for all threads
 void variation1() {
 
     int rc;
@@ -131,14 +153,84 @@ void variation1() {
 
 }
 
-
+/**
+ * calculates each element in output matrixC in a thread
+ *
+ * @param args struct that contains which row from matrixA to multiply and get sum with which column from matrixB
+ */
 void *calculateElement(void *args) {
 
     struct ThreadData *data = (struct ThreadData *) args;
 
-    sem_wait(&mutex);
-    printf("row %d , column %d \n", data->aRowIndex, data->bColumnIndex);
+    int rowIndex = data->aRowIndex;
+    int columnIndex = data->bColumnIndex;
+
+
+    int sum = 0;
+
+    for (int i = 0; i < aColumns; i++)
+        sum += matrixA[rowIndex][i] * matrixB[i][columnIndex];
+
+    matrixC[rowIndex][columnIndex] = sum;
+
+
     free(data);
-    sem_post(&mutex);
+
+}
+
+void variation2() {
+
+    int rc;
+    pthread_attr_t attr;
+    pthread_t thread[cRows];
+    void *status;
+
+    //Initialize and set thread detached attribute
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+    for (int i = 0; i < cRows; i++) {
+
+        //create thread
+        rc = pthread_create(&thread[i], &attr, calculateRow, (void *) i);
+
+        if (rc) {
+            printf("ERROR; return code from pthread_create() is %d\n", rc);
+            exit(-1);
+        }
+
+    }
+
+
+    // Free attribute and wait for the other threads by using join
+    pthread_attr_destroy(&attr);
+    for (int i = 0; i < cRows; i++) {
+        rc = pthread_join(thread[i], &status);
+        if (rc) {
+            printf("ERROR; return code from pthread_join() is %d\n", rc);
+            exit(-1);
+        }
+
+//        printf("Main: completed join with thread %ld having a status of % ld\n", i, (long) status);
+    }
+}
+
+/**
+ * calculates each row of the output matrix c in a thread
+ *
+ * @param args takes matrixC row index to calculate
+ */
+void *calculateRow(void *args) {
+
+    int cRowToCalculate = (int) args;
+
+    int sum;
+    for (int i = 0; i < cColumns; i++) {
+        sum = 0;
+        for (int j = 0; j < aColumns; j++)
+            sum += matrixA[cRowToCalculate][j] * matrixB[j][i];
+        matrixC[cRowToCalculate][i] = sum;
+
+    }
 
 }
